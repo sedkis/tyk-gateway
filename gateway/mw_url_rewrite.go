@@ -199,9 +199,7 @@ func (gw *Gateway) urlRewrite(meta *apidef.URLRewriteMeta, r *http.Request) (str
 			groupReplace[indexVal] = replacementVal
 		}
 
-		for _, v := range replaceGroups {
-			newpath = strings.Replace(newpath, v[0], groupReplace[v[0]], -1)
-		}
+		newpath = gw.expandRewriteTemplate(r, rewriteToPath, groupReplace)
 
 		log.Debug("URL Re-written from: ", path)
 		log.Debug("URL Re-written to: ", newpath)
@@ -210,9 +208,26 @@ func (gw *Gateway) urlRewrite(meta *apidef.URLRewriteMeta, r *http.Request) (str
 		ctxSetUrlRewritePath(r, r.URL.Path)
 	}
 
-	newpath = gw.ReplaceTykVariables(r, newpath, true)
-
 	return newpath, nil
+}
+
+// expandRewriteTemplate builds the rewritten path from the API definition's
+// rewrite template. Tyk variables and secret references are resolved only on
+// the template's own literal segments; the captured request groups are spliced
+// in afterwards, so request-derived bytes are never scanned for `kv://`,
+// `$kv{}`, `$secret_*` or `$tyk_*` references.
+func (gw *Gateway) expandRewriteTemplate(r *http.Request, template string, groupReplace map[string]string) string {
+	var out strings.Builder
+
+	last := 0
+	for _, loc := range dollarMatch.FindAllStringIndex(template, -1) {
+		out.WriteString(gw.ReplaceTykVariables(r, template[last:loc[0]], true))
+		out.WriteString(groupReplace[template[loc[0]:loc[1]]])
+		last = loc[1]
+	}
+	out.WriteString(gw.ReplaceTykVariables(r, template[last:], true))
+
+	return out.String()
 }
 
 // ReplaceTykVariables implements a variable replacement hook. It will replace

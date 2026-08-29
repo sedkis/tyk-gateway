@@ -1451,6 +1451,84 @@ func TestReplaceTykVariables(t *testing.T) {
 	}
 }
 
+func TestURLRewriteDoesNotResolveRequestData(t *testing.T) {
+	ts := StartTest(nil)
+	defer ts.Close()
+
+	installFakeKVStores(t, ts.Gw, map[string]map[string]string{
+		"secrets": {
+			"api_token": "conf-token-value",
+		},
+		"vault": {
+			"secret/data/db": `{"password": "vault-db-password"}`,
+		},
+	})
+
+	t.Setenv("TYK_SECRET_ENV_VAR", "env-var-value")
+
+	tests := []struct {
+		name         string
+		pattern, to  string
+		in           string
+		want         string
+		mustNotMatch []string
+	}{
+		{
+			name:         "captured $secret_conf reference stays literal",
+			pattern:      "/test/(.*)",
+			to:           "/change/$1",
+			in:           "/test/$secret_conf.api_token",
+			want:         "/change/$secret_conf.api_token",
+			mustNotMatch: []string{"conf-token-value"},
+		},
+		{
+			name:         "captured $secret_env reference stays literal",
+			pattern:      "/test/(.*)",
+			to:           "/change/$1",
+			in:           "/test/$secret_env.env_var",
+			want:         "/change/$secret_env.env_var",
+			mustNotMatch: []string{"env-var-value"},
+		},
+		{
+			name:         "captured $secret_vault reference stays literal",
+			pattern:      "/test/(.*)",
+			to:           "/change/$1",
+			in:           "/test/$secret_vault.secret/data/db.password",
+			want:         "/change/$secret_vault.secret/data/db.password",
+			mustNotMatch: []string{"vault-db-password"},
+		},
+		{
+			name:         "non-matching request path is never scanned for references",
+			pattern:      "/nomatch/(.*)",
+			to:           "/change/$1",
+			in:           "/test/$secret_conf.api_token",
+			want:         "/test/$secret_conf.api_token",
+			mustNotMatch: []string{"conf-token-value"},
+		},
+		{
+			name:    "references in the rewrite template still resolve",
+			pattern: "/test/(.*)",
+			to:      "/change/$secret_conf.api_token/$1",
+			in:      "/test/foo",
+			want:    "/change/conf-token-value/foo",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			meta := apidef.URLRewriteMeta{MatchPattern: tc.pattern, RewriteTo: tc.to}
+			r := httptest.NewRequest("GET", tc.in, nil)
+
+			got, err := ts.Gw.urlRewrite(&meta, r)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+			for _, secret := range tc.mustNotMatch {
+				assert.NotContains(t, got, secret, "resolved secret leaked into the rewritten URL")
+			}
+		})
+	}
+}
+
 func TestReplaceTykVariables_SecretConf(t *testing.T) {
 	ts := StartTest(func(conf *config.Config) {
 		conf.Secrets = map[string]string{
