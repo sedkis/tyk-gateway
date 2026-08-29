@@ -694,6 +694,28 @@ type HttpServerOptionsConfig struct {
 	// A value of 1 means using the last IP, 2 means second to last, and so on.
 	XFFDepth int `json:"xff_depth"`
 
+	// TrustedProxies is a list of IP addresses and/or CIDR ranges of the proxies (load balancers,
+	// reverse proxies, service meshes) that sit in front of the Gateway.
+	//
+	// The client supplied IP forwarding headers (`X-Forwarded-For`, `X-Real-IP`) are only used to
+	// determine the client IP address when the request reached the Gateway from one of these
+	// addresses. For requests coming from anywhere else the transport level address is used, so
+	// that a client can not spoof its own IP address to pass an IP allow list (`allowed_ips`) or to
+	// evade an IP block list (`blacklisted_ips`).
+	//
+	// This list is empty by default, which means no forwarding header is trusted. If the Gateway is
+	// deployed behind a proxy you must list that proxy here (and configure `xff_depth` accordingly)
+	// for the forwarded client IP to be honoured.
+	TrustedProxies []string `json:"trusted_proxies"`
+
+	// TrustAllProxies restores the legacy behaviour of trusting the `X-Forwarded-For` and
+	// `X-Real-IP` headers of every request, regardless of where the request came from.
+	//
+	// This is insecure whenever the Gateway is reachable by clients directly: any client can then
+	// choose the IP address the Gateway believes it has. Only enable it when every request is
+	// guaranteed to arrive through a proxy that overwrites these headers.
+	TrustAllProxies bool `json:"trust_all_proxies"`
+
 	// MaxResponseBodySize sets an upper limit on the response body (payload) size in bytes. It defaults to 0, which means there is no restriction on the response body size.
 	//
 	// The Gateway will return `HTTP 500 Response Body Too Large` if the response payload exceeds MaxResponseBodySize+1 bytes.

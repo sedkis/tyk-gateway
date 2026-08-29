@@ -700,6 +700,15 @@ func TestSingleJoiningSlash(t *testing.T) {
 }
 
 func TestRequestIP(t *testing.T) {
+	oldGlobal := request.Global
+	defer func() { request.Global = oldGlobal }()
+
+	cfg := config.Config{}
+	cfg.HttpServerOptions.TrustAllProxies = true
+	request.Global = func() config.Config {
+		return cfg
+	}
+
 	tests := []struct {
 		remote, real, forwarded, want string
 	}{
@@ -738,7 +747,7 @@ func TestRequestIP(t *testing.T) {
 			remote:    "1.2.3.4:80",
 			real:      "5.6.7.8",
 			forwarded: "4.3.2.1, px1, px2",
-			want:      "5.6.7.8",
+			want:      "4.3.2.1",
 		},
 	}
 	for _, tc := range tests {

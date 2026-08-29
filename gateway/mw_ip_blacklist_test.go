@@ -9,18 +9,24 @@ import (
 
 	"github.com/TykTechnologies/tyk/apidef"
 	"github.com/TykTechnologies/tyk/header"
+	"github.com/TykTechnologies/tyk/request"
 )
 
 var testBlackListIPData = []struct {
 	remote, forwarded, xRealIP string
+	trusted                    bool
 	wantCode                   int
 }{
-	{"127.0.0.1:80", "", "", http.StatusForbidden},         // remote exact match
-	{"127.0.0.2:80", "", "", http.StatusForbidden},         // remote CIDR match
-	{"10.0.0.1:80", "", "", http.StatusOK},                 // no match
-	{"10.0.0.1:80", "127.0.0.1", "", http.StatusForbidden}, // forwarded exact match
-	{"10.0.0.1:80", "127.0.0.2", "", http.StatusForbidden}, // forwarded CIDR match
-	{"10.0.0.1:80", "", "bob", http.StatusOK},              // no match
+	{"127.0.0.1:80", "", "", false, http.StatusForbidden},        // remote exact match
+	{"127.0.0.2:80", "", "", false, http.StatusForbidden},        // remote CIDR match
+	{"10.0.0.1:80", "", "", false, http.StatusOK},                // no match
+	{"10.0.0.1:80", "127.0.0.1", "", false, http.StatusOK},       // untrusted forwarded exact match
+	{"10.0.0.1:80", "127.0.0.1", "", true, http.StatusForbidden}, // trusted forwarded exact match
+	{"10.0.0.1:80", "127.0.0.2", "", false, http.StatusOK},       // untrusted forwarded CIDR match
+	{"10.0.0.1:80", "127.0.0.2", "", true, http.StatusForbidden}, // trusted forwarded CIDR match
+	{"10.0.0.1:80", "", "127.0.0.1", false, http.StatusOK},       // untrusted X-Real-IP
+	{"10.0.0.1:80", "", "127.0.0.1", true, http.StatusForbidden}, // trusted X-Real-IP
+	{"10.0.0.1:80", "", "bob", false, http.StatusOK},             // no match
 }
 
 func testPrepareIPBlacklistMiddleware() *APISpec {
@@ -108,9 +114,13 @@ func TestIPBlackListMiddleware_EnabledForSpec(t *testing.T) {
 	}
 }
 func TestIPBlacklistMiddleware(t *testing.T) {
+	oldGlobal := request.Global
+	defer func() { request.Global = oldGlobal }()
+
 	spec := testPrepareIPBlacklistMiddleware()
 
 	for ti, tc := range testBlackListIPData {
+		setIPMiddlewareConfig(tc.trusted)
 		rec := httptest.NewRecorder()
 		req := TestReq(t, "GET", "/", nil)
 		req.RemoteAddr = tc.remote
@@ -144,6 +154,7 @@ func BenchmarkIPBlacklistMiddleware(b *testing.B) {
 	rec := httptest.NewRecorder()
 	for i := 0; i < b.N; i++ {
 		for ti, tc := range testBlackListIPData {
+			setIPMiddlewareConfig(tc.trusted)
 			req := TestReq(b, "GET", "/", nil)
 			req.RemoteAddr = tc.remote
 			if tc.forwarded != "" {
