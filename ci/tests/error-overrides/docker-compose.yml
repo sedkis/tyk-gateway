@@ -22,7 +22,7 @@ services:
       - ./certs:/opt/tyk-gateway/certs:ro
       - ./templates:/opt/tyk-gateway/templates:ro
     environment:
-      - TYK_GW_SECRET=352d20ee67be67f6340b4c0605b044b7
+      - TYK_GW_SECRET=ci-test-secret-do-not-use-in-production
       - TYK_GW_STORAGE_HOST=redis
       - TYK_GW_STORAGE_PORT=6379
       - TYK_GW_STORAGE_DATABASE=1

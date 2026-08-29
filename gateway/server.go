@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -996,7 +997,17 @@ func (gw *Gateway) checkIsAPIOwner(next http.Handler) http.Handler {
 	secret := gw.GetConfig().Secret
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tykAuthKey := r.Header.Get(header.XTykAuthorization)
-		if tykAuthKey != secret {
+		if secret == "" {
+			mainLog.Error("Control API access denied: gateway secret is not set")
+			doJSONWrite(w, http.StatusForbidden, apiError("Control API access denied: gateway secret is not set"))
+			return
+		}
+		if secret == config.InsecureDefaultSecret && !gw.GetConfig().AllowInsecureConfigs {
+			mainLog.Error("Control API access denied: the well-known default gateway secret is rejected; set secret via TYK_GW_SECRET or the config secret")
+			doJSONWrite(w, http.StatusForbidden, apiError("Control API access denied: the well-known default gateway secret is rejected; set secret via TYK_GW_SECRET or the config secret"))
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(tykAuthKey), []byte(secret)) != 1 {
 			// Error
 			mainLog.Warning("Attempted administrative access with invalid or missing key!")
 

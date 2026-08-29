@@ -85,6 +85,73 @@ func TestConfigInspectionEndpoints_AuthRequired(t *testing.T) {
 	})
 }
 
+func TestControlAPISecretHardening(t *testing.T) {
+	t.Run("empty secret denies requests with and without a header", func(t *testing.T) {
+		ts := StartTest(func(cnf *config.Config) {
+			cnf.Secret = ""
+			cnf.AllowInsecureConfigs = false
+			cnf.HealthCheck.EnableHealthChecks = true
+		})
+		defer ts.Close()
+
+		_, _ = ts.Run(t,
+			test.TestCase{Method: http.MethodGet, Path: "/tyk/reload", Code: http.StatusForbidden},
+			test.TestCase{
+				Method:  http.MethodGet,
+				Path:    "/tyk/reload",
+				Headers: map[string]string{"X-Tyk-Authorization": "any-secret"},
+				Code:    http.StatusForbidden,
+			},
+		)
+	})
+
+	t.Run("well-known secret is denied unless insecure configs are allowed", func(t *testing.T) {
+		deniedTS := StartTest(func(cnf *config.Config) {
+			cnf.Secret = config.InsecureDefaultSecret
+			cnf.AllowInsecureConfigs = false
+			cnf.HealthCheck.EnableHealthChecks = true
+		})
+		defer deniedTS.Close()
+
+		_, _ = deniedTS.Run(t, test.TestCase{
+			Method:  http.MethodGet,
+			Path:    "/tyk/reload",
+			Headers: map[string]string{"X-Tyk-Authorization": config.InsecureDefaultSecret},
+			Code:    http.StatusForbidden,
+		})
+
+		allowedTS := StartTest(func(cnf *config.Config) {
+			cnf.Secret = config.InsecureDefaultSecret
+			cnf.AllowInsecureConfigs = true
+			cnf.HealthCheck.EnableHealthChecks = true
+		})
+		defer allowedTS.Close()
+
+		_, _ = allowedTS.Run(t, test.TestCase{
+			Method:  http.MethodGet,
+			Path:    "/tyk/reload",
+			Headers: map[string]string{"X-Tyk-Authorization": config.InsecureDefaultSecret},
+			Code:    http.StatusOK,
+		})
+	})
+
+	t.Run("explicit secret permits requests", func(t *testing.T) {
+		ts := StartTest(func(cnf *config.Config) {
+			cnf.Secret = "test-secret"
+			cnf.AllowInsecureConfigs = false
+			cnf.HealthCheck.EnableHealthChecks = true
+		})
+		defer ts.Close()
+
+		_, _ = ts.Run(t, test.TestCase{
+			Method:  http.MethodGet,
+			Path:    "/tyk/reload",
+			Headers: map[string]string{"X-Tyk-Authorization": "test-secret"},
+			Code:    http.StatusOK,
+		})
+	})
+}
+
 func TestConfigHandler_FullConfig(t *testing.T) {
 	ts := StartTest(func(cnf *config.Config) {
 		cnf.EnableConfigInspection = true

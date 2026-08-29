@@ -99,6 +99,18 @@ func TestDefaultValueAndWriteDefaultConf(t *testing.T) {
 	}
 }
 
+func TestWriteDefaultGeneratesUniqueSecret(t *testing.T) {
+	t.Setenv("TYK_GW_SECRET", "")
+
+	var first, second Config
+	require.NoError(t, WriteDefault("", &first))
+	require.NoError(t, WriteDefault("", &second))
+
+	assert.NotEmpty(t, first.Secret)
+	assert.NotEqual(t, InsecureDefaultSecret, first.Secret)
+	assert.NotEqual(t, first.Secret, second.Secret)
+}
+
 func TestKVStoresFromEnv(t *testing.T) {
 	t.Setenv("TYK_GW_KV_STORES", `{
 		"vault-prod": {

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,7 +31,7 @@ var (
 
 	Default = Config{
 		ListenPort:     8080,
-		Secret:         "352d20ee67be67f6340b4c0605b044b7",
+		Secret:         "",
 		TemplatePath:   "templates",
 		MiddlewarePath: "middleware",
 		AppPath:        "apps/",
@@ -86,6 +88,9 @@ const (
 
 const (
 	envPrefix = "TYK_GW"
+
+	// InsecureDefaultSecret is the historical hardcoded default secret; it is public and must never be used.
+	InsecureDefaultSecret = "352d20ee67be67f6340b4c0605b044b7"
 
 	dnsCacheDefaultTtl           = 3600
 	dnsCacheDefaultCheckInterval = 60
@@ -1656,6 +1661,14 @@ func WriteDefault(in string, conf *Config) error {
 	conf.TemplatePath = filepath.Join(wd, "templates")
 	if err := envconfig.Process(envPrefix, conf); err != nil {
 		return err
+	}
+	if conf.Secret == "" {
+		randomSecret := make([]byte, 16)
+		if _, err := rand.Read(randomSecret); err != nil {
+			return fmt.Errorf("could not generate gateway secret: %w", err)
+		}
+		conf.Secret = hex.EncodeToString(randomSecret)
+		log.Warn("No gateway secret configured; generated a random gateway secret. Set TYK_GW_SECRET or config secret explicitly.")
 	}
 	if in == "" {
 		return nil
