@@ -11,8 +11,8 @@ import (
 var (
 	log            = logger.Get().WithField("prefix", "checkup")
 	defaultConfigs = config.Config{
-		Secret:     "352d20ee67be67f6340b4c0605b044b7",
-		NodeSecret: "352d20ee67be67f6340b4c0605b044b7",
+		Secret:     config.InsecureDefaultSecret,
+		NodeSecret: config.InsecureDefaultSecret,
 		AnalyticsConfig: config.AnalyticsConfigConfig{
 			PoolSize: runtime.NumCPU(),
 		},

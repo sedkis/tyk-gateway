@@ -657,7 +657,7 @@ EOF
 )
 
     local response=$(curl -s -X POST \
-        -H "x-tyk-authorization: 352d20ee67be67f6340b4c0605b044b7" \
+        -H "x-tyk-authorization: ci-test-secret-do-not-use-in-production" \
         -H "Content-Type: application/json" \
         -d "$key_data" \
         "${TYK_OVERRIDE_URL}/tyk/keys/create" 2>/dev/null)
@@ -670,7 +670,7 @@ EOF
 delete_test_key() {
     local key=$1
     curl -s -X DELETE \
-        -H "x-tyk-authorization: 352d20ee67be67f6340b4c0605b044b7" \
+        -H "x-tyk-authorization: ci-test-secret-do-not-use-in-production" \
         "${TYK_OVERRIDE_URL}/tyk/keys/$key" > /dev/null 2>&1
 }
 
@@ -785,7 +785,7 @@ run_override_test_external_auth_denied() {
     # Step 1: Create an OAuth client
     log_info "  Step 1: Creating OAuth client with policy '${api_id}-policy'..."
     local client_response=$(curl -s -X POST \
-        -H "x-tyk-authorization: 352d20ee67be67f6340b4c0605b044b7" \
+        -H "x-tyk-authorization: ci-test-secret-do-not-use-in-production" \
         -H "Content-Type: application/json" \
         -d "{\"redirect_uri\": \"http://localhost/callback\", \"policy_id\": \"${api_id}-policy\"}" \
         "${TYK_OVERRIDE_URL}/tyk/oauth/clients/create" 2>/dev/null)
@@ -814,7 +814,7 @@ run_override_test_external_auth_denied() {
         log_warn "Failed to get access token. Response: $token_response"
         # Cleanup client
         curl -s -X DELETE \
-            -H "x-tyk-authorization: 352d20ee67be67f6340b4c0605b044b7" \
+            -H "x-tyk-authorization: ci-test-secret-do-not-use-in-production" \
             "${TYK_OVERRIDE_URL}/tyk/oauth/clients/${api_id}/${client_id}" > /dev/null 2>&1
         log_fail "$test_name"
         ((FAILED++))
@@ -832,7 +832,7 @@ run_override_test_external_auth_denied() {
     # Step 4: Delete the OAuth client
     log_info "  Step 4: Deleting OAuth client..."
     curl -s -X DELETE \
-        -H "x-tyk-authorization: 352d20ee67be67f6340b4c0605b044b7" \
+        -H "x-tyk-authorization: ci-test-secret-do-not-use-in-production" \
         "${TYK_OVERRIDE_URL}/tyk/oauth/clients/${api_id}/${client_id}" > /dev/null 2>&1
     sleep 1
 

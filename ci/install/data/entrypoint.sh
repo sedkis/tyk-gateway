@@ -18,9 +18,10 @@ if [[ -z "${TYK_GW_SECRET}" ]]; then
   export TYK_GW_SECRET=$(cat $TYKCONF | jq -r .secret)
 fi
 
-# If no secret found in tyk.conf, will use default license
+# If no secret found in tyk.conf, generate an ephemeral secret for this process.
 if [[ -z "${TYK_GW_SECRET}" ]]; then
-  export TYK_GW_SECRET=352d20ee67be67f6340b4c0605b044b7
+  export TYK_GW_SECRET=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+  echo "WARNING: no gateway secret was configured; generated an ephemeral secret. Set TYK_GW_SECRET explicitly."
 fi
 
 cd /opt/tyk-gateway/
