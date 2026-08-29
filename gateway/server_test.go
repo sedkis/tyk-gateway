@@ -528,6 +528,59 @@ func TestGateway_afterConfSetup(t *testing.T) {
 	}
 }
 
+func TestGateway_checkIsAPIOwner(t *testing.T) {
+	tests := []struct {
+		name           string
+		secret         string
+		authKey        string
+		expectedStatus int
+	}{
+		{
+			name:           "configured secret accepts matching key",
+			secret:         "configured-secret",
+			authKey:        "configured-secret",
+			expectedStatus: http.StatusNoContent,
+		},
+		{
+			name:           "configured secret rejects invalid key",
+			secret:         "configured-secret",
+			authKey:        "invalid-secret",
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "empty secret rejects empty key",
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "empty secret rejects non-empty key",
+			authKey:        "configured-secret",
+			expectedStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := &Gateway{}
+			gw.SetConfig(config.Config{Secret: tt.secret})
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.authKey != "" {
+				req.Header.Set(header.XTykAuthorization, tt.authKey)
+			}
+			rec := httptest.NewRecorder()
+
+			gw.checkIsAPIOwner(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			})).ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.expectedStatus, rec.Code)
+			if tt.expectedStatus == http.StatusForbidden {
+				assert.Contains(t, rec.Body.String(), "Attempted administrative access with invalid or missing key!")
+			}
+		})
+	}
+}
+
 func TestGateway_kvResolvers_hotReload(t *testing.T) {
 	dir := t.TempDir()
 	writeFile := func(name, content string) {

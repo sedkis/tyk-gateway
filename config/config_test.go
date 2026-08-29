@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -97,6 +98,25 @@ func TestDefaultValueAndWriteDefaultConf(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteDefaultGeneratesSecret(t *testing.T) {
+	assert.Empty(t, Default.Secret)
+
+	first := &Config{}
+	require.NoError(t, WriteDefault("", first))
+	require.Len(t, first.Secret, 32)
+	_, err := hex.DecodeString(first.Secret)
+	require.NoError(t, err)
+
+	second := &Config{}
+	require.NoError(t, WriteDefault("", second))
+	require.NotEqual(t, first.Secret, second.Secret)
+
+	t.Setenv("TYK_GW_SECRET", "configured-secret")
+	configured := &Config{}
+	require.NoError(t, WriteDefault("", configured))
+	require.Equal(t, "configured-secret", configured.Secret)
 }
 
 func TestKVStoresFromEnv(t *testing.T) {
