@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -644,6 +645,9 @@ func (gw *Gateway) setupGlobals() {
 	if gw.GetConfig().Security.PrivateCertificateEncodingSecret != "" {
 		certificateSecret = gw.GetConfig().Security.PrivateCertificateEncodingSecret
 	}
+	if certificateSecret == "" {
+		mainLog.Error("Stored certificate private keys have no encryption secret; set security.private_certificate_encoding_secret")
+	}
 
 	storeCert := &storage.RedisCluster{KeyPrefix: "cert-", HashKeys: false, ConnectionHandler: gw.StorageConnectionHandler}
 	storeCert.Connect()
@@ -996,7 +1000,12 @@ func (gw *Gateway) checkIsAPIOwner(next http.Handler) http.Handler {
 	secret := gw.GetConfig().Secret
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tykAuthKey := r.Header.Get(header.XTykAuthorization)
-		if tykAuthKey != secret {
+		if secret == "" {
+			mainLog.Error("No gateway secret is configured; the control API is disabled")
+			doJSONWrite(w, http.StatusForbidden, apiError("Attempted administrative access with invalid or missing key!"))
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(tykAuthKey), []byte(secret)) != 1 {
 			// Error
 			mainLog.Warning("Attempted administrative access with invalid or missing key!")
 

@@ -86,7 +86,11 @@ func cpus() {
 func defaultSecrets(c *config.Config) {
 	if c.Secret == defaultConfigs.Secret {
 		log.WithField("config.secret", defaultConfigs.Secret).
-			Warning("Default secret should be changed for production.")
+			Error("Default secret should be changed for production.")
+	}
+
+	if c.Secret == "" {
+		log.Error("No gateway secret is configured; the control API is disabled until secret or TYK_GW_SECRET is set.")
 	}
 
 	if c.NodeSecret == defaultConfigs.NodeSecret {

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,7 +31,6 @@ var (
 
 	Default = Config{
 		ListenPort:     8080,
-		Secret:         "352d20ee67be67f6340b4c0605b044b7",
 		TemplatePath:   "templates",
 		MiddlewarePath: "middleware",
 		AppPath:        "apps/",
@@ -918,7 +919,7 @@ type Config struct {
 	// Set this to expose the Tyk Gateway API on a separate port. You can protect it behind a firewall if needed. Please make sure you follow this guide when setting the control port https://tyk.io/docs/tyk-self-managed/#change-your-control-port.
 	ControlAPIPort int `json:"control_api_port"`
 
-	// This should be changed as soon as Tyk is installed on your system.
+	// There is no default for this value; a random secret is generated when a config is created.
 	// This value is used in every interaction with the Tyk Gateway API. It should be passed along as the X-Tyk-Authorization header in any requests made.
 	// Tyk assumes that you are sensible enough not to expose the management endpoints publicly and to keep this configuration value to yourself.
 	Secret string `json:"secret" structviewer:"obfuscate"`
@@ -1653,6 +1654,12 @@ func WriteDefault(in string, conf *Config) error {
 	}
 
 	*conf = Default
+	if conf.Secret == "" {
+		conf.Secret, err = generateSecret()
+		if err != nil {
+			return err
+		}
+	}
 	conf.TemplatePath = filepath.Join(wd, "templates")
 	if err := envconfig.Process(envPrefix, conf); err != nil {
 		return err
@@ -1661,6 +1668,14 @@ func WriteDefault(in string, conf *Config) error {
 		return nil
 	}
 	return WriteConf(in, conf)
+}
+
+func generateSecret() (string, error) {
+	secret := make([]byte, 16)
+	if _, err := rand.Read(secret); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(secret), nil
 }
 
 // Load will load a configuration file, trying each of the paths given
