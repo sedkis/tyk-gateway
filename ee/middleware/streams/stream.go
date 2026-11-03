@@ -2,10 +2,10 @@ package streams
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
-	"strings"
+	"slices"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -46,10 +46,13 @@ func (s *Stream) Start(config map[string]interface{}, mux service.HTTPMultiplexe
 		return err
 	}
 
-	configPayload = s.removeUnsafe(configPayload)
-
 	s.logger.Debugf("Building new stream")
-	builder := service.NewStreamBuilder()
+	env, err := s.newEnvironment()
+	if err != nil {
+		s.logger.Errorf("Failed to create stream environment: %v", err)
+		return err
+	}
+	builder := env.NewStreamBuilder()
 	handler := slog.NewJSONHandler(newBentoLogAdapter(s.logger), nil)
 	builder.SetLogger(slog.New(handler))
 
@@ -138,46 +141,66 @@ func (s *Stream) Reset() error {
 	return s.Stop()
 }
 
+// unsafeComponents lists Bento components that are disabled unless explicitly
+// allowed via streaming.allow_unsafe. A listed name is disabled for every
+// component kind (input, processor, output, cache) that registers it.
 var unsafeComponents = []string{
-	// Inputs
-	"csv", "dynamic", "file", "inproc", "socket", "socket_server", "stdin", "subprocess",
-
-	// Processors
-	"command", "subprocess", "wasm",
-
-	// Outputs
-	"file", "inproc", "socket",
-
-	// Caches
-	"file",
+	"command", "csv", "dynamic", "file", "inproc", "socket", "socket_server", "stdin", "subprocess", "wasm",
 }
 
-func (s *Stream) removeUnsafe(yamlBytes []byte) []byte {
-	filteredUnsafeComponents := []string{}
+// newEnvironment returns a Bento environment in which every unsafe component
+// that is not allowlisted is replaced by a stub that fails linting and
+// construction. Enforcement happens in Bento's own config parser, so it applies
+// wherever the component appears (lists, brokers, resources, `type:` fields).
+func (s *Stream) newEnvironment() (*service.Environment, error) {
+	env := service.NewEnvironment()
 
-	for _, component := range unsafeComponents {
-		allowed := false
-		for _, allowedComponent := range s.allowedUnsafe {
-			if component == allowedComponent {
-				allowed = true
-				break
+	for _, name := range s.blockedComponents() {
+		reason := fmt.Sprintf("component '%s' is disabled; add it to streaming.allow_unsafe to enable it", name)
+		spec := service.NewConfigSpec().
+			Summary(reason).
+			LintRule(fmt.Sprintf("root = %q", reason))
+		disabled := errors.New(reason)
+
+		if _, ok := env.GetInputConfig(name); ok {
+			if err := env.RegisterInput(name, spec, func(*service.ParsedConfig, *service.Resources) (service.Input, error) {
+				return nil, disabled
+			}); err != nil {
+				return nil, err
 			}
 		}
-		if !allowed {
-			filteredUnsafeComponents = append(filteredUnsafeComponents, component)
+		if _, ok := env.GetProcessorConfig(name); ok {
+			if err := env.RegisterProcessor(name, spec, func(*service.ParsedConfig, *service.Resources) (service.Processor, error) {
+				return nil, disabled
+			}); err != nil {
+				return nil, err
+			}
+		}
+		if _, ok := env.GetOutputConfig(name); ok {
+			if err := env.RegisterOutput(name, spec, func(*service.ParsedConfig, *service.Resources) (service.Output, int, error) {
+				return nil, 0, disabled
+			}); err != nil {
+				return nil, err
+			}
+		}
+		if _, ok := env.GetCacheConfig(name); ok {
+			if err := env.RegisterCache(name, spec, func(*service.ParsedConfig, *service.Resources) (service.Cache, error) {
+				return nil, disabled
+			}); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	yamlString := string(yamlBytes)
-	for _, key := range filteredUnsafeComponents {
-		if strings.Contains(yamlString, key+":") {
-			// Use regexp to match the whole block of the given key
-			re := regexp.MustCompile(fmt.Sprintf(`(?m)^\s*%s:\s*(.*\r?\n?)(\s+.*(?:\r?\n?|\z))*`, regexp.QuoteMeta(key)))
-			// Remove matched parts
-			yamlString = re.ReplaceAllString(yamlString, "")
+	return env, nil
+}
 
-			s.logger.Info("Removed unsafe component: ", key)
+func (s *Stream) blockedComponents() []string {
+	blocked := make([]string, 0, len(unsafeComponents))
+	for _, component := range unsafeComponents {
+		if !slices.Contains(s.allowedUnsafe, component) {
+			blocked = append(blocked, component)
 		}
 	}
-	return []byte(yamlString)
+	return blocked
 }
