@@ -1128,6 +1128,88 @@ func TestGetVersionFromRequest(t *testing.T) {
 	})
 }
 
+func TestEndpointMatchingDoesNotStripArbitraryPathSegment(t *testing.T) {
+	ts := StartTest(func(c *config.Config) {
+		c.HttpServerOptions.EnablePathPrefixMatching = true
+		c.HttpServerOptions.EnablePathSuffixMatching = true
+	})
+	defer ts.Close()
+
+	ignoredHealth := apidef.VersionInfo{Name: "v1", UseExtendedPaths: true}
+	ignoredHealth.ExtendedPaths.Ignored = []apidef.EndPointMeta{{
+		Path:          "/health",
+		Method:        http.MethodGet,
+		MethodActions: map[string]apidef.EndpointMethodMeta{http.MethodGet: {Action: apidef.NoAction}},
+	}}
+
+	allowPublic := apidef.VersionInfo{Name: "v1", UseExtendedPaths: true}
+	allowPublic.ExtendedPaths.WhiteList = []apidef.EndPointMeta{{
+		Path:          "/public",
+		Method:        http.MethodGet,
+		MethodActions: map[string]apidef.EndpointMethodMeta{http.MethodGet: {Action: apidef.NoAction}},
+	}}
+
+	buildVersioned := func(location string, versionInfo apidef.VersionInfo, keyless bool) {
+		ts.Gw.BuildAndLoadAPI(func(spec *APISpec) {
+			spec.Proxy.ListenPath = "/orders/"
+			spec.Proxy.StripListenPath = true
+			spec.UseKeylessAccess = keyless
+			spec.VersionData.NotVersioned = false
+			spec.VersionData.DefaultVersion = ""
+			spec.VersionData.Versions = map[string]apidef.VersionInfo{"v1": versionInfo}
+			spec.VersionDefinition.Location = location
+			spec.VersionDefinition.Key = apidef.DefaultAPIVersionKey
+			spec.VersionDefinition.StripVersioningData = true
+		})
+	}
+
+	headers := map[string]string{apidef.DefaultAPIVersionKey: "v1"}
+
+	t.Run("header versioning: ignored rule does not match extra leading segment", func(t *testing.T) {
+		buildVersioned(apidef.HeaderLocation, ignoredHealth, false)
+
+		_, _ = ts.Run(t, []test.TestCase{
+			{Path: "/orders/health", Headers: headers, Code: http.StatusOK, BodyMatch: `"URI":"/health"`},
+			{Path: "/orders/admin/health", Headers: headers, Code: http.StatusUnauthorized},
+			{Path: "/orders/v1/health", Headers: headers, Code: http.StatusUnauthorized},
+		}...)
+	})
+
+	t.Run("url param versioning: ignored rule does not match extra leading segment", func(t *testing.T) {
+		buildVersioned(apidef.URLParamLocation, ignoredHealth, false)
+
+		_, _ = ts.Run(t, []test.TestCase{
+			{Path: "/orders/health?" + apidef.DefaultAPIVersionKey + "=v1", Code: http.StatusOK, BodyMatch: `"URI":"/health"`},
+			{Path: "/orders/admin/health?" + apidef.DefaultAPIVersionKey + "=v1", Code: http.StatusUnauthorized},
+		}...)
+	})
+
+	t.Run("url versioning: version segment is stripped only once", func(t *testing.T) {
+		buildVersioned(apidef.URLLocation, ignoredHealth, false)
+
+		_, _ = ts.Run(t, []test.TestCase{
+			{Path: "/orders/v1/health", Code: http.StatusOK, BodyMatch: `"URI":"/health"`},
+			{Path: "/orders/v1/admin/health", Code: http.StatusUnauthorized},
+		}...)
+	})
+
+	t.Run("allow list does not match extra leading segment", func(t *testing.T) {
+		buildVersioned(apidef.HeaderLocation, allowPublic, true)
+
+		_, _ = ts.Run(t, []test.TestCase{
+			{Path: "/orders/public", Headers: headers, Code: http.StatusOK, BodyMatch: `"URI":"/public"`},
+			{Path: "/orders/secret/public", Headers: headers, Code: http.StatusForbidden},
+		}...)
+
+		buildVersioned(apidef.URLLocation, allowPublic, true)
+
+		_, _ = ts.Run(t, []test.TestCase{
+			{Path: "/orders/v1/public", Code: http.StatusOK, BodyMatch: `"URI":"/public"`},
+			{Path: "/orders/v1/secret/public", Code: http.StatusForbidden},
+		}...)
+	})
+}
+
 func BenchmarkGetVersionFromRequest(b *testing.B) {
 	b.ReportAllocs()
 	ts := StartTest(nil)

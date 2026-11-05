@@ -2518,8 +2518,13 @@ func (a *APISpec) StripListenPath(reqPath string) string {
 }
 
 // StripVersionPath will strip the version from the URL. The input URL
-// should already have listen path stripped.
+// should already have listen path stripped. Only URL based versioning
+// carries the version in the path, so other locations are returned as is.
 func (a *APISpec) StripVersionPath(reqPath string) string {
+	if a.VersionDefinition.Location != apidef.URLLocation {
+		return reqPath
+	}
+
 	// First part of the url is the version fragment
 	part := strings.Split(strings.Trim(reqPath, "/"), "/")[0]
 

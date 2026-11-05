@@ -187,14 +187,13 @@ func (u *URLSpec) matchesMethod(method string) bool {
 // it will match the regex against the clean URL with stripped listen path first,
 // then it will match against the full URL including the listen path as provided.
 // APISpec to provide URL sanitization of the input is passed along.
+//
+// Version data is not stripped here: when versioning data is stripped, the
+// version check has already removed it from the request path, so the path
+// matched is the one forwarded upstream.
 func (a *URLSpec) matchesPath(reqPath string, api *APISpec) bool {
 	clean := api.StripListenPath(reqPath)
-	noVersion := api.StripVersionPath(clean)
 	// match /users
-	if noVersion != clean && a.spec.MatchString(noVersion) {
-		return true
-	}
-	// match /v3/users
 	if a.spec.MatchString(clean) {
 		return true
 	}
