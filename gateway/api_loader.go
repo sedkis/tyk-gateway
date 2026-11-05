@@ -827,7 +827,7 @@ func (d *DummyProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			ctxSetVersionInfo(r, nil)
 
-			if targetAPI := d.Gw.fuzzyFindAPI(r.URL.Hostname()); targetAPI != nil {
+			if targetAPI := d.Gw.fuzzyFindAPIInOrg(r.URL.Hostname(), d.SH.Spec.OrgID); targetAPI != nil {
 				if h, found := d.Gw.apisHandlesByID.Load(targetAPI.APIID); found {
 					if chain, ok := h.(*ChainObject); ok {
 						handler = chain.ThisHandler
@@ -893,9 +893,18 @@ func (d *DummyProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (gw *Gateway) findInternalHttpHandlerByNameOrID(apiNameOrID string) (handler http.Handler, targetAPI *APISpec, ok bool) {
-	targetAPI = gw.fuzzyFindAPI(apiNameOrID)
+	return gw.handlerForAPI(gw.fuzzyFindAPI(apiNameOrID))
+}
+
+// findInternalHttpHandlerByNameOrIDInOrg is like findInternalHttpHandlerByNameOrID
+// but refuses targets that belong to a different organisation than orgID.
+func (gw *Gateway) findInternalHttpHandlerByNameOrIDInOrg(apiNameOrID, orgID string) (handler http.Handler, targetAPI *APISpec, ok bool) {
+	return gw.handlerForAPI(gw.fuzzyFindAPIInOrg(apiNameOrID, orgID))
+}
+
+func (gw *Gateway) handlerForAPI(targetAPI *APISpec) (handler http.Handler, _ *APISpec, ok bool) {
 	if targetAPI == nil {
-		return
+		return nil, nil, false
 	}
 
 	h, found := gw.apisHandlesByID.Load(targetAPI.APIID)
@@ -929,6 +938,19 @@ func APILoopingName(name string) string {
 }
 
 func (gw *Gateway) fuzzyFindAPI(search string) *APISpec {
+	return gw.fuzzyFindAPIMatching(search, func(*APISpec) bool { return true })
+}
+
+// fuzzyFindAPIInOrg finds a looping target by name or ID, considering only
+// APIs owned by orgID so that a loop cannot cross organisation boundaries.
+// Definitions without an org ID (single-tenant setups) are not scoped.
+func (gw *Gateway) fuzzyFindAPIInOrg(search, orgID string) *APISpec {
+	return gw.fuzzyFindAPIMatching(search, func(api *APISpec) bool {
+		return orgID == "" || api.OrgID == "" || api.OrgID == orgID
+	})
+}
+
+func (gw *Gateway) fuzzyFindAPIMatching(search string, allowed func(*APISpec) bool) *APISpec {
 	if search == "" {
 		return nil
 	}
@@ -937,6 +959,9 @@ func (gw *Gateway) fuzzyFindAPI(search string) *APISpec {
 	defer gw.apisMu.RUnlock()
 
 	for _, api := range gw.apisByID {
+		if !allowed(api) {
+			continue
+		}
 		if api.APIID == search ||
 			api.Id.Hex() == search ||
 			strings.EqualFold(APILoopingName(api.Name), search) {

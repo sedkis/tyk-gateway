@@ -19,6 +19,7 @@ import (
 	proxyproto "github.com/pires/go-proxyproto"
 
 	"github.com/TykTechnologies/again"
+	"github.com/TykTechnologies/tyk/apidef"
 	"github.com/TykTechnologies/tyk/config"
 	"github.com/TykTechnologies/tyk/internal/httputil"
 	tyklog "github.com/TykTechnologies/tyk/log"
@@ -63,7 +64,21 @@ func (h *handleWrapper) handleRequestLimits(w http.ResponseWriter, r *http.Reque
 	return true
 }
 
+// stripInboundLoopMarkers removes the internal looping markers from a request
+// received from a client. The tyk:// scheme and the x-tyk-internal header are
+// only meaningful when set by the gateway itself (URL rewrites, virtual
+// endpoints, GraphQL data sources); a client sending an absolute-form request
+// target or the header must not be able to trigger an internal loop.
+func stripInboundLoopMarkers(r *http.Request) {
+	r.URL.Scheme = ""
+	r.URL.Host = ""
+	r.URL.User = nil
+	r.Header.Del(apidef.TykInternalApiHeader)
+}
+
 func (h *handleWrapper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	stripInboundLoopMarkers(r)
+
 	// Store request start time for accurate latency measurement including all middlewares
 	ctxSetRequestStartTime(r, time.Now())
 	// Capture original request path before any middleware modifications

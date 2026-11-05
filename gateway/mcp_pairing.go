@@ -80,7 +80,10 @@ func (gw *Gateway) currentSyntheticMCPAdapterSpecs() map[string]*APISpec {
 
 func (gw *Gateway) findInternalHTTPHandlerForLoop(apiNameOrID string, caller *APISpec, r *http.Request) (handler http.Handler, targetAPI *APISpec, ok bool) {
 	targetName := apiNameOrID
-	if caller != nil && caller.APIDefinition != nil && caller.IsPairedMCPAdapterProxy() {
+	if caller == nil || caller.APIDefinition == nil {
+		return gw.findInternalHttpHandlerByNameOrID(targetName)
+	}
+	if caller.IsPairedMCPAdapterProxy() {
 		if _, restAPIID, paired := pairedMCPAdapterTarget(caller.Proxy.TargetURL); paired {
 			targetName = pairing.CanonicalAdapterAPIID(restAPIID)
 			if r != nil {
@@ -88,7 +91,7 @@ func (gw *Gateway) findInternalHTTPHandlerForLoop(apiNameOrID string, caller *AP
 			}
 		}
 	}
-	return gw.findInternalHttpHandlerByNameOrID(targetName)
+	return gw.findInternalHttpHandlerByNameOrIDInOrg(targetName, caller.OrgID)
 }
 
 func computeMCPPairing(specs []*APISpec) (pairing.Snapshot, error) {
