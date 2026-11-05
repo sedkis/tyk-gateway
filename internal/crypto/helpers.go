@@ -109,48 +109,73 @@ func ValidateRequestCerts(r *http.Request, certs []*tls.Certificate) error {
 		return ErrTlsRequired
 	}
 
-	// Loop through r.TLS.PeerCertificates to add intermediate CA certificates to the allow list.
-	for _, peerCertificate := range r.TLS.PeerCertificates {
-		certID := HexSHA256(peerCertificate.Raw)
+	// Only the leaf certificate is proven by the TLS handshake (the client holds its private key).
+	// The remaining peer certificates are unauthenticated chain hints and may only serve as intermediates.
+	leaf := r.TLS.PeerCertificates[0]
+	intermediates := r.TLS.PeerCertificates[1:]
+	leafID := HexSHA256(leaf.Raw)
 
-		for _, cert := range certs {
-			// In case a cert can't be parsed or is invalid,
-			// it will be present in the cert list as 'nil'
-			if cert == nil {
-				// Invalid cert, continue to next one
-				continue
-			}
+	for _, cert := range certs {
+		// In case a cert can't be parsed or is invalid,
+		// it will be present in the cert list as 'nil'
+		if cert == nil || cert.Leaf == nil {
+			// Invalid cert, continue to next one
+			continue
+		}
 
-			if cert.Leaf.IsCA && verifyCertAgainstCA(cert, peerCertificate) == nil {
-				return nil
-			}
+		if roots := trustedCAPool(cert); roots != nil && verifyLeaf(leaf, roots, intermediates) == nil {
+			return nil
+		}
 
-			// Extensions[0] contains cache of certificate SHA256
-			if string(cert.Leaf.Extensions[0].Value) == certID {
-				if time.Now().After(cert.Leaf.NotAfter) {
-					return ErrCertExpired
-				}
-				// Happy flow, we matched a certificate
-				return nil
+		// Extensions[0] contains cache of certificate SHA256
+		if len(cert.Leaf.Extensions) > 0 && string(cert.Leaf.Extensions[0].Value) == leafID {
+			if time.Now().After(cert.Leaf.NotAfter) {
+				return ErrCertExpired
 			}
+			// Happy flow, we matched a certificate
+			return nil
 		}
 	}
 
-	return errors.New("Certificate with SHA256 " + HexSHA256(r.TLS.PeerCertificates[0].Raw) + " not allowed")
+	return errors.New("Certificate with SHA256 " + leafID + " not allowed")
 }
 
-func verifyCertAgainstCA(caCert *tls.Certificate, peerCert *x509.Certificate) error {
-	// Create a certificate pool and add the CA certificate to it
-	roots := x509.NewCertPool()
-	roots.AddCert(caCert.Leaf)
-
-	// Create a verification options struct
-	opts := x509.VerifyOptions{
-		Roots: roots,
+// trustedCAPool returns the CA certificates of an allowed certificate: the certificate itself
+// when it is a CA, and any CA certificates included in its chain. It returns nil if there are none.
+func trustedCAPool(cert *tls.Certificate) *x509.CertPool {
+	var roots *x509.CertPool
+	add := func(c *x509.Certificate) {
+		if roots == nil {
+			roots = x509.NewCertPool()
+		}
+		roots.AddCert(c)
 	}
 
-	// Verify the client certificate
-	_, err := peerCert.Verify(opts)
+	if cert.Leaf.IsCA {
+		add(cert.Leaf)
+	}
+
+	for i := 1; i < len(cert.Certificate); i++ {
+		c, err := x509.ParseCertificate(cert.Certificate[i])
+		if err == nil && c.IsCA {
+			add(c)
+		}
+	}
+
+	return roots
+}
+
+func verifyLeaf(leaf *x509.Certificate, roots *x509.CertPool, intermediates []*x509.Certificate) error {
+	intermediatePool := x509.NewCertPool()
+	for _, c := range intermediates {
+		intermediatePool.AddCert(c)
+	}
+
+	_, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediatePool,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	})
 	return err
 }
 
