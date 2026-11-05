@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -193,29 +195,75 @@ func (s *Middleware) processStreamsConfig(r *http.Request, streams map[string]an
 			s.Logger().Debugf("No request available to replace variables in stream config for %s", streamID)
 		} else {
 			s.Logger().Debugf("Stream config for %s: %v", streamID, stream)
-			marshaledStream, err := json.Marshal(stream)
+			replacedStream, err := s.replaceStreamVariables(r, stream)
 			if err != nil {
-				s.Logger().Errorf("Failed to marshal stream config: %v", err)
+				s.Logger().Errorf("Failed to replace variables in stream config: %v", err)
 				continue
 			}
-			replacedStream := s.Gw.ReplaceTykVariables(r, string(marshaledStream), true)
-
-			if replacedStream != string(marshaledStream) {
-				s.Logger().Debugf("Stream config changed for %s: %s", streamID, replacedStream)
-			} else {
-				s.Logger().Debugf("Stream config has not changed for %s: %s", streamID, replacedStream)
-			}
-
-			var unmarshaledStream map[string]interface{}
-			err = json.Unmarshal([]byte(replacedStream), &unmarshaledStream)
-			if err != nil {
-				s.Logger().Errorf("Failed to unmarshal replaced stream config: %v", err)
-				continue
-			}
-			stream = unmarshaledStream
+			s.Logger().Debugf("Stream config for %s after variable replacement: %v", streamID, replacedStream)
+			stream = replacedStream
 		}
 		config.Streams[streamID] = stream
 	}
+}
+
+// requestVariableMatch matches request-derived variables ($tyk_context.* and $tyk_meta.*).
+var requestVariableMatch = regexp.MustCompile(`\$tyk_(?:context|meta)\.[A-Za-z0-9_\-\.]+`)
+
+// replaceStreamVariables returns a deep copy of the stream config with Tyk variables
+// replaced inside string leaf values only. Substituted values are treated as data and
+// are never re-parsed, so they cannot alter the structure of the stream config.
+func (s *Middleware) replaceStreamVariables(r *http.Request, stream any) (map[string]any, error) {
+	marshaledStream, err := json.Marshal(stream)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal stream config: %w", err)
+	}
+
+	var streamCopy map[string]any
+	if err := json.Unmarshal(marshaledStream, &streamCopy); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal stream config: %w", err)
+	}
+
+	for key, value := range streamCopy {
+		streamCopy[key] = s.replaceVariablesInValue(r, value)
+	}
+
+	return streamCopy, nil
+}
+
+func (s *Middleware) replaceVariablesInValue(r *http.Request, value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, item := range v {
+			v[key] = s.replaceVariablesInValue(r, item)
+		}
+		return v
+	case []any:
+		for i, item := range v {
+			v[i] = s.replaceVariablesInValue(r, item)
+		}
+		return v
+	case string:
+		return s.replaceVariablesInString(r, v)
+	default:
+		return v
+	}
+}
+
+// replaceVariablesInString resolves operator-defined references (secrets, env, KV) in the
+// literal parts of a string, and URL-escapes every request-derived variable value
+// unconditionally.
+func (s *Middleware) replaceVariablesInString(r *http.Request, in string) string {
+	var out strings.Builder
+	last := 0
+	for _, loc := range requestVariableMatch.FindAllStringIndex(in, -1) {
+		out.WriteString(s.Gw.ReplaceTykVariables(r, in[last:loc[0]], true))
+		rawValue := s.Gw.ReplaceTykVariables(r, in[loc[0]:loc[1]], false)
+		out.WriteString(url.QueryEscape(rawValue))
+		last = loc[1]
+	}
+	out.WriteString(s.Gw.ReplaceTykVariables(r, in[last:], true))
+	return out.String()
 }
 
 // ProcessRequest will handle the streaming functionality.
